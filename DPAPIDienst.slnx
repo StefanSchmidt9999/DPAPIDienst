@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="DPAPIDienst/DPAPIDienst.vcxproj" Id="8bc7b140-bd86-436a-a36e-c29a68879c73" />
+</Solution>
