@@ -1,12 +1,35 @@
+#define WIN32_LEAN_AND_MEAN
+
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
+#include <wincrypt.h>
 #include <winhttp.h>
-#include <string>
-#include <sstream>
 #include <objbase.h>
 
-#pragma comment(lib, "Winhttp.lib")
-#pragma comment(lib, "Ole32.lib")
+#include <string>
+#include <fstream>
+#include <sstream>
+
+#pragma comment(lib, "Ws2_32.lib")
+#pragma comment(lib, "Crypt32.lib")
 #pragma comment(lib, "Advapi32.lib")
+
+//#include <windows.h>
+//#include <winhttp.h>
+//#include <string>
+//#include <sstream>
+//#include <objbase.h>
+//#include <winsock2.h>
+//#include <ws2tcpip.h>
+//#include <wincrypt.h>
+//#include <fstream>
+
+//#pragma comment(lib, "Winhttp.lib")
+//#pragma comment(lib, "Ole32.lib")
+//#pragma comment(lib, "Advapi32.lib")
+//#pragma comment(lib, "Ws2_32.lib")
+//#pragma comment(lib, "Crypt32.lib")
 
 #define SERVICE_NAME L"DPAPIDienst"
 
@@ -18,6 +41,7 @@ HANDLE gStopEvent = nullptr;
 // --- Forward ---
 void WINAPI ServiceMain(DWORD argc, LPWSTR* argv);
 void WINAPI ServiceCtrlHandler(DWORD ctrlCode);
+std::wstring DecryptClientIdFromFile();
 
 // ------------------------------------------------------------
 // Entry (für leeres Projekt!)
@@ -218,3 +242,69 @@ void WINAPI ServiceCtrlHandler(DWORD ctrlCode)
         SetEvent(gStopEvent);
     }
 }
+
+// -------------  DecryptClientIdFromFile() ----------------
+std::wstring DecryptClientIdFromFile()
+{
+    /*std::wstring filePath =
+        std::wstring(_wgetenv(L"LOCALAPPDATA")) +
+        L"\\ImpulsAufKurs\\client.dat";*/
+
+    wchar_t* localAppData = nullptr;
+    size_t len = 0;
+
+    _wdupenv_s(&localAppData, &len, L"LOCALAPPDATA");
+
+    if (localAppData == nullptr)
+    {
+        OutputDebugString(L"LOCALAPPDATA nicht gefunden.\n");
+        return L"";
+    }
+
+    std::wstring filePath =
+        std::wstring(localAppData) +
+        L"\\ImpulsAufKurs\\client.dat";
+
+    free(localAppData);
+
+    std::ifstream file(filePath, std::ios::binary);
+
+    if (!file.is_open())
+    {
+        OutputDebugString(L"client.dat nicht gefunden.\n");
+        return L"";
+    }
+
+    std::string encryptedData(
+        (std::istreambuf_iterator<char>(file)),
+        std::istreambuf_iterator<char>());
+
+    DATA_BLOB inputBlob{};
+    inputBlob.pbData = reinterpret_cast<BYTE*>(encryptedData.data());
+    inputBlob.cbData = static_cast<DWORD>(encryptedData.size());
+
+    DATA_BLOB outputBlob{};
+
+    BOOL ok = CryptUnprotectData(
+        &inputBlob,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        0,
+        &outputBlob);
+
+    if (!ok)
+    {
+        OutputDebugString(L"DPAPI Entschlüsselung fehlgeschlagen.\n");
+        return L"";
+    }
+
+    std::wstring clientId(
+        reinterpret_cast<wchar_t*>(outputBlob.pbData));
+
+    LocalFree(outputBlob.pbData);
+
+    return clientId;
+}
+// --- Ende ---
