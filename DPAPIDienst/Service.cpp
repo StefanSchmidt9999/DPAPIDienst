@@ -225,7 +225,10 @@ void WINAPI ServiceMain(DWORD, LPWSTR*)
     // --- Hauptloop ---
     while (WaitForSingleObject(gStopEvent, 10000) == WAIT_TIMEOUT)
     {
-        OutputDebugString(L"DPAPIDienst sendet Testnachricht...\n");
+
+        OutputDebugString(L"DPAPIDienst läuft. Wartet auf Blazor-Anfrage.\n");
+
+        /*OutputDebugString(L"DPAPIDienst sendet Testnachricht...\n");
 
         std::wstring clientId = L"CPP-CLIENT-001";
         std::wstring requestId = CreateGuidString();
@@ -233,7 +236,7 @@ void WINAPI ServiceMain(DWORD, LPWSTR*)
         std::wstring soapXml = CreateSoapXml(
             clientId,
             requestId,
-            L"Hallo von C++ Windows Dienst");
+            L"Alles Scheiße, Deine Elly");
 
         bool ok = SendSoapToAzure(soapXml);
 
@@ -244,7 +247,7 @@ void WINAPI ServiceMain(DWORD, LPWSTR*)
         else
         {
             OutputDebugString(L"FEHLER beim Senden an Azure.\n");
-        }
+        }*/
     }
 
     OutputDebugString(L"DPAPIDienst wird beendet \n");
