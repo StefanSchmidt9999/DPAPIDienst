@@ -10,27 +10,12 @@
 
 #include <string>
 #include <fstream>
-#include <sstream>
+#include <cstdlib>
+#include <iostream>
 
 #pragma comment(lib, "Ws2_32.lib")
 #pragma comment(lib, "Crypt32.lib")
 #pragma comment(lib, "Advapi32.lib")
-
-//#include <windows.h>
-//#include <winhttp.h>
-//#include <string>
-//#include <sstream>
-//#include <objbase.h>
-//#include <winsock2.h>
-//#include <ws2tcpip.h>
-//#include <wincrypt.h>
-//#include <fstream>
-
-//#pragma comment(lib, "Winhttp.lib")
-//#pragma comment(lib, "Ole32.lib")
-//#pragma comment(lib, "Advapi32.lib")
-//#pragma comment(lib, "Ws2_32.lib")
-//#pragma comment(lib, "Crypt32.lib")
 
 #define SERVICE_NAME L"DPAPIDienst"
 
@@ -45,154 +30,93 @@ void WINAPI ServiceCtrlHandler(DWORD ctrlCode);
 std::wstring DecryptClientIdFromFile();
 DWORD WINAPI LocalHttpServerThread(LPVOID);
 std::string WStringToUtf8(const std::wstring& text);
+void RunConsoleMode();
 
 // ------------------------------------------------------------
 // Entry (für leeres Projekt!)
-int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 {
-    SERVICE_TABLE_ENTRY table[] =
+    SERVICE_TABLE_ENTRYW table[] =
     {
-        { (LPWSTR)SERVICE_NAME, ServiceMain },
+        { const_cast<LPWSTR>(SERVICE_NAME), ServiceMain },
         { nullptr, nullptr }
     };
 
-    if (!StartServiceCtrlDispatcher(table))
+    if (!StartServiceCtrlDispatcherW(table))
     {
-        // Debug-Modus (nicht als Service gestartet)
-        MessageBox(nullptr, L"Läuft NICHT als Service (Debugmodus)", SERVICE_NAME, MB_OK);
-        ServiceMain(0, nullptr);
+        DWORD err = GetLastError();
+
+        if (err == ERROR_FAILED_SERVICE_CONTROLLER_CONNECT)
+        {
+            // Debug-Modus (nicht als Service gestartet)
+            MessageBox(nullptr, L"Läuft NICHT als Service (Debugmodus)", SERVICE_NAME, MB_OK);
+            RunConsoleMode();
+            return 0;
+        }
+
+        return 1;
     }
 
     return 0;
 }
-// ------------------------------------------------------------
-std::wstring CreateGuidString()
+
+void RunConsoleMode()
 {
-    GUID guid;
-    CoCreateGuid(&guid);
-
-    wchar_t buffer[64]{};
-    StringFromGUID2(guid, buffer, 64);
-
-    return std::wstring(buffer);
-}
-
-std::wstring CreateSoapXml(
-    const std::wstring& clientId,
-    const std::wstring& requestId,
-    const std::wstring& message)
-{
-    std::wstringstream ss;
-
-    ss << L"<?xml version=\"1.0\"?>"
-        << L"<soap:Envelope xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\">"
-        << L"<soap:Body>"
-        << L"<Request>"
-        << L"<ClientId>" << clientId << L"</ClientId>"
-        << L"<RequestId>" << requestId << L"</RequestId>"
-        << L"<Message>" << message << L"</Message>"
-        << L"</Request>"
-        << L"</soap:Body>"
-        << L"</soap:Envelope>";
-
-    return ss.str();
-}
-
-bool SendSoapToAzure(const std::wstring& soapXml)
-{
-    HINTERNET hSession = WinHttpOpen(
-        L"DPAPIDienst/1.0",
-        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        WINHTTP_NO_PROXY_NAME,
-        WINHTTP_NO_PROXY_BYPASS,
-        0);
-
-    if (!hSession)
-        return false;
-
-    HINTERNET hConnect = WinHttpConnect(
-        hSession,
-        L"mysoapapp-eqdtckhxd0enegft.canadacentral-01.azurewebsites.net",
-        INTERNET_DEFAULT_HTTPS_PORT,
-        0);
-
-    if (!hConnect)
+    gStopEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+    if (!gStopEvent)
     {
-        WinHttpCloseHandle(hSession);
-        return false;
+        OutputDebugString(L"CreateEvent fehlgeschlagen (ConsoleMode).\n");
+        return;
     }
 
-    HINTERNET hRequest = WinHttpOpenRequest(
-        hConnect,
-        L"POST",
-        L"/api/hello",
-        nullptr,
-        WINHTTP_NO_REFERER,
-        WINHTTP_DEFAULT_ACCEPT_TYPES,
-        WINHTTP_FLAG_SECURE);
+    OutputDebugString(L"DPAPIDienst startet im ConsoleMode.\n");
 
-    if (!hRequest)
-    {
-        WinHttpCloseHandle(hConnect);
-        WinHttpCloseHandle(hSession);
-        return false;
-    }
-
-    int sizeNeeded = WideCharToMultiByte(
-        CP_UTF8,
-        0,
-        soapXml.c_str(),
-        -1,
+    HANDLE hHttpThread = CreateThread(
         nullptr,
         0,
+        LocalHttpServerThread,
         nullptr,
+        0,
         nullptr);
 
-    std::string utf8Xml(sizeNeeded - 1, '\0');
-
-    WideCharToMultiByte(
-        CP_UTF8,
-        0,
-        soapXml.c_str(),
-        -1,
-        utf8Xml.data(),
-        sizeNeeded,
-        nullptr,
-        nullptr);
-
-    std::wstring headers =
-        L"Content-Type: application/xml; charset=utf-8\r\n";
-
-    BOOL ok = WinHttpSendRequest(
-        hRequest,
-        headers.c_str(),
-        static_cast<DWORD>(headers.length()),
-        reinterpret_cast<LPVOID>(utf8Xml.data()),
-        static_cast<DWORD>(utf8Xml.size()),
-        static_cast<DWORD>(utf8Xml.size()),
-        0);
-
-    if (ok)
+    if (hHttpThread)
     {
-        ok = WinHttpReceiveResponse(hRequest, nullptr);
+        OutputDebugString(L"Lokaler HTTP-Thread wurde gestartet (ConsoleMode).\n");
+    }
+    else
+    {
+        OutputDebugString(L"FEHLER: Lokaler HTTP-Thread konnte nicht gestartet werden (ConsoleMode).\n");
     }
 
-    WinHttpCloseHandle(hRequest);
-    WinHttpCloseHandle(hConnect);
-    WinHttpCloseHandle(hSession);
+    while (WaitForSingleObject(gStopEvent, 10000) == WAIT_TIMEOUT)
+    {
+        OutputDebugString(L"DPAPIDienst läuft im ConsoleMode. Wartet auf Blazor-Anfrage.\n");
+    }
 
-    return ok == TRUE;
+    if (hHttpThread)
+    {
+        WaitForSingleObject(hHttpThread, 5000);
+        CloseHandle(hHttpThread);
+    }
+
+    CloseHandle(gStopEvent);
+    gStopEvent = nullptr;
+    OutputDebugString(L"DPAPIDienst beendet ConsoleMode.\n");
 }
 
 // ------------------------------------------------------------
 void WINAPI ServiceMain(DWORD, LPWSTR*)
 {
     gStatusHandle = RegisterServiceCtrlHandler(SERVICE_NAME, ServiceCtrlHandler);
+    if (!gStatusHandle)
+    {
+        OutputDebugString(L"RegisterServiceCtrlHandler fehlgeschlagen.\n");
+        return; // kein SetServiceStatus mit NULL-Handle
+    }
 
     gStatus.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
     gStatus.dwCurrentState = SERVICE_START_PENDING;
     gStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP;
-
     SetServiceStatus(gStatusHandle, &gStatus);
 
     gStopEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
@@ -227,27 +151,6 @@ void WINAPI ServiceMain(DWORD, LPWSTR*)
     {
 
         OutputDebugString(L"DPAPIDienst läuft. Wartet auf Blazor-Anfrage.\n");
-
-        /*OutputDebugString(L"DPAPIDienst sendet Testnachricht...\n");
-
-        std::wstring clientId = L"CPP-CLIENT-001";
-        std::wstring requestId = CreateGuidString();
-
-        std::wstring soapXml = CreateSoapXml(
-            clientId,
-            requestId,
-            L"Alles Scheiße, Deine Elly");
-
-        bool ok = SendSoapToAzure(soapXml);
-
-        if (ok)
-        {
-            OutputDebugString(L"SOAP/XML erfolgreich an Azure gesendet.\n");
-        }
-        else
-        {
-            OutputDebugString(L"FEHLER beim Senden an Azure.\n");
-        }*/
     }
 
     OutputDebugString(L"DPAPIDienst wird beendet \n");
@@ -277,10 +180,6 @@ void WINAPI ServiceCtrlHandler(DWORD ctrlCode)
 // -------------  DecryptClientIdFromFile() ----------------
 std::wstring DecryptClientIdFromFile()
 {
-    /*std::wstring filePath =
-        std::wstring(_wgetenv(L"LOCALAPPDATA")) +
-        L"\\ImpulsAufKurs\\client.dat";*/
-
     wchar_t* localAppData = nullptr;
     size_t len = 0;
 
@@ -296,8 +195,10 @@ std::wstring DecryptClientIdFromFile()
         std::wstring(localAppData) +
         L"\\ImpulsAufKurs\\client.dat";
 
-    free(localAppData);
+    OutputDebugString(filePath.c_str());
+    OutputDebugString(L"\n");
 
+    free(localAppData);
     std::ifstream file(filePath, std::ios::binary);
 
     if (!file.is_open())
